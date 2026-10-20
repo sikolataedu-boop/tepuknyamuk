@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#7edaff">
 <meta name="description" content="Game pembelajaran Tepuk Nyamuk v4 berbasis hand tracking MediaPipe, bank soal guru, kategori, kalibrasi, pembahasan, dan ekspor hasil.">
-<title>TEPUK NYAMUK v4.4 — Hand Tracking Neon</title>
+<title>TEPUK NYAMUK v4.4.1 — Hand Tracking Neon</title>
 <style>
 @import url("https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800&family=Fredoka:wght@400;500;600;700&display=swap");
 
@@ -232,6 +233,13 @@ html,body{color:#3d1a76;font-family:"Fredoka","Trebuchet MS",sans-serif}
 #calibrationBegin{display:none!important}
 @media(max-width:760px){.fly{width:clamp(122px,35vw,185px)}.flyImage{width:clamp(144px,42vw,230px)!important;height:clamp(90px,19vh,155px)!important}.answerBubble{font-size:clamp(11px,2.9vw,14px);min-height:46px;padding:6px 8px}.answerBubble.long{font-size:11px}.answerBubble.veryLong{font-size:10px}}
 @media(max-height:560px){.fly{width:clamp(120px,18vw,185px)}.flyImage{height:clamp(78px,17vh,98px)!important;width:clamp(124px,18.5vw,190px)!important}.answerBubble{min-height:42px!important;padding:5px 8px!important;font-size:clamp(10px,1.1vw,14px)!important;border-width:2px!important;line-height:1.08!important}.answerBubble.long,.answerBubble.veryLong{font-size:10px!important}}
+
+/* Perbaikan fullscreen PID Android - tidak mengganggu arena. */
+#fullscreenNotice{position:fixed;z-index:60;left:50%;top:clamp(12px,5vh,48px);transform:translateX(-50%);width:min(94vw,600px);padding:14px 46px 14px 18px;background:#fff9df;color:#503468;border:3px solid #ffcf50;border-radius:19px;box-shadow:0 10px 26px #23174266;font:700 clamp(13px,1.5vw,17px)/1.5 "Fredoka",system-ui,sans-serif;text-align:left;pointer-events:auto;white-space:normal}
+#fullscreenNotice.hidden{display:none!important}
+#fullscreenDismiss{position:absolute;right:8px;top:5px;border:0;background:transparent;color:#6d367b;font-size:25px;padding:0 9px;cursor:pointer}
+#fullscreenBtnMenu{font-weight:900}
+@media(max-width:600px){#fullscreenNotice{top:8px;padding:11px 36px 11px 12px}}
 </style>
 </head>
 <body>
@@ -250,6 +258,7 @@ html,body{color:#3d1a76;font-family:"Fredoka","Trebuchet MS",sans-serif}
   <div id="handInfo"></div>
   <div class="buttons"><button class="iconbtn" id="soundBtn" title="Suara hidup/mati">🔊</button><button class="iconbtn" id="fullBtn" title="Layar penuh">⛶ Layar penuh</button><button class="iconbtn" id="exitBtn" title="Keluar">✕</button></div>
 </div>
+<div id="fullscreenNotice" class="hidden" role="status" aria-live="polite"><span id="fullscreenNoticeText"></span><button type="button" id="fullscreenDismiss" aria-label="Tutup pemberitahuan">×</button></div>
 <div id="burstText" role="status" aria-live="polite"></div>
 <div id="feedbackCard" class="hidden" role="region" aria-label="Pembahasan jawaban">
   <div id="feedbackTitle">Benar</div><div id="feedbackAnswer"></div><p id="feedbackExplanation"></p>
@@ -370,7 +379,7 @@ html,body{color:#3d1a76;font-family:"Fredoka","Trebuchet MS",sans-serif}
 </div>
 </div>
 <script type="module">
-// TEPUK NYAMUK v4.4 — single-file deployment; all user data stored locally.
+// TEPUK NYAMUK v4.4.1 — single-file deployment; all user data stored locally.
 // GestureRecognizer (MediaPipe Tasks Vision) loaded dynamically only in camera mode.
 const MP_VERSION='0.10.35';
 const MP_PROVIDERS=[
@@ -512,16 +521,76 @@ async function loadRecognizer(){if(recognizer)return;let last;for(const provider
 async function cameraPermissionState(){
  try{if(navigator.permissions?.query){const result=await navigator.permissions.query({name:'camera'});return result.state||'unknown'}}catch{}return 'unknown';
 }
-function requestCameraFullscreenFromClick(){
- // Fullscreen API requires user activation. Trigger while handling "Mulai dengan Kamera" click,
- // so the calibrated game is already fullscreen without asking for another click.
- if(document.fullscreenElement||!document.documentElement?.requestFullscreen)return;
- try{const p=document.documentElement.requestFullscreen({navigationUI:'hide'});p?.catch(()=>{});}catch{}
+let fullscreenNoticeTimer=null;
+function fullscreenCurrentlyActive(){
+ let byDisplay=false;
+ try{byDisplay=window.matchMedia?.('(display-mode: fullscreen)').matches||false}catch{}
+ return !!(document.fullscreenElement||document.webkitFullscreenElement||byDisplay);
+}
+function showFullscreenNotice(message){
+ const notice=get('fullscreenNotice'),text=get('fullscreenNoticeText');
+ if(!notice||!text)return;
+ text.textContent=message;
+ notice.classList.remove('hidden');
+ if(fullscreenNoticeTimer)clearTimeout(fullscreenNoticeTimer);
+ fullscreenNoticeTimer=setTimeout(()=>notice.classList.add('hidden'),12500);
+}
+function fullscreenFailure(error){
+ console.warn('Fullscreen tidak tersedia pada browser PID:',error);
+ showFullscreenNotice('Mode layar penuh dibatasi browser PID. Buka game dengan Chrome Android, pilih menu ⋮ → Tambahkan ke layar utama / Instal aplikasi, lalu jalankan dari ikonnya. Jika dibuka lewat aplikasi lain, gunakan Chrome langsung.');
+}
+function requestGameFullscreen(){
+ // Dipanggil langsung dari event klik/tap, agar aktivasi pengguna tidak kedaluwarsa.
+ // Untuk APK Android Offline, immersive dikontrol oleh aktivitas native.
+ if(window.AndroidOffline && typeof window.AndroidOffline.enterImmersive==='function'){
+  try{window.AndroidOffline.enterImmersive();return true}catch(err){console.warn('Immersive Android gagal:',err)}
+ }
+ if(fullscreenCurrentlyActive())return true;
+ const root=document.documentElement;
+ const method=root.requestFullscreen||root.webkitRequestFullscreen||root.msRequestFullscreen;
+ if(typeof method!=='function'){
+  fullscreenFailure(new Error('Fullscreen API tidak tersedia'));
+  return false;
+ }
+ if(document.fullscreenEnabled===false && !root.webkitRequestFullscreen){
+  fullscreenFailure(new Error('Kebijakan browser tidak mengizinkan fullscreen'));
+  return false;
+ }
+ try{
+  const result=method.call(root); // jangan kirim argumen; kompatibel lintas WebView/browser
+  if(result && typeof result.catch==='function')result.catch(fullscreenFailure);
+  return true;
+ }catch(err){fullscreenFailure(err);return false}
+}
+function toggleGameFullscreen(){
+ if(window.AndroidOffline && typeof window.AndroidOffline.enterImmersive==='function'){
+  return requestGameFullscreen();
+ }
+ const exit=document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen;
+ if((document.fullscreenElement||document.webkitFullscreenElement)&&typeof exit==='function'){
+  try{const p=exit.call(document);if(p&&typeof p.catch==='function')p.catch(fullscreenFailure)}catch(err){fullscreenFailure(err)}
+  return true;
+ }
+ return requestGameFullscreen();
+}
+function syncFullscreenButton(){
+ const btn=get('fullBtn');if(!btn)return;
+ const active=fullscreenCurrentlyActive();
+ btn.textContent=active?'⛶ Keluar penuh':'⛶ Layar penuh';
+ btn.title=active?'Keluar dari layar penuh':'Aktifkan layar penuh';
+}
+function setupFullscreenSupport(){
+ get('fullscreenDismiss').onclick=()=>get('fullscreenNotice').classList.add('hidden');
+ for(const evt of ['fullscreenchange','webkitfullscreenchange']){
+  document.addEventListener(evt,()=>{get('fullscreenNotice').classList.add('hidden');syncFullscreenButton()});
+ }
+ for(const evt of ['fullscreenerror','webkitfullscreenerror'])document.addEventListener(evt,()=>fullscreenFailure(new Error(evt)));
+ syncFullscreenButton();
 }
 async function setupCamera(attempt){if(!window.isSecureContext)throw Error('Kamera memerlukan HTTPS atau localhost. Gunakan GitHub Pages, bukan file://.');if(!navigator.mediaDevices?.getUserMedia)throw Error('Browser tidak menyediakan API kamera. Gunakan Chrome/Edge terbaru.');const permission=await cameraPermissionState();reportStep(permission==='granted'?'✅ Izin kamera sudah tersedia. Menyiapkan kamera…':'⏳ Mengaktifkan kamera…');const camera=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'}});if(attempt!==setupAttempt){camera.getTracks().forEach(t=>t.stop());throw Error('Persiapan dibatalkan.')}stream=camera;video.srcObject=stream;const preview=get('cameraPreview');preview.srcObject=stream;preview.classList.add('visible');try{await Promise.all([video.play(),preview.play()])}catch{await video.play()}reportStep('✅ Kamera hidup. Memuat model pelacakan tangan…');await loadRecognizer();if(attempt!==setupAttempt)throw Error('Persiapan dibatalkan.')}
 function prepareSession(mode){state.mode=mode;state.queue=makeQueue();if(!state.queue.length)throw Error('Kategori yang dipilih tidak memiliki soal.');state.player=get('playerName').value.trim().slice(0,65)||'Pemain';state.category=get('playCategory').value==='ALL'?'Semua materi':get('playCategory').value;state.difficulty=settings.difficulty;state.speed=Number(settings.speed);state.qIndex=0;state.score=0;state.correct=0;state.wrong=0;state.combo=0;state.elapsed=0;state.log=[];state.timerTotal=Number(settings.timerMode)===0?Infinity:Math.max(1,state.queue.length*Number(settings.timerMode));state.timeLeft=state.timerTotal;state.feedback=false;state.lastCapture=-1e9;state.particles=[];state.floaters=[];state.hand=null;lastDetect=0;lastVideoTime=-1;detectFailCount=0}
 function startSession(){state.calib.active=false;state.running=true;seedMosquitoes();showGame();setStatus('')}
-async function begin(mode){if(get('startCamera').disabled)return;if(dirty&&!confirm('Form soal memiliki perubahan yang belum disimpan. Tetap bermain dengan bank soal tersimpan?'))return;if(mode==='camera')requestCameraFullscreenFromClick();const attempt=++setupAttempt,btn=get('startCamera');btn.disabled=true;get('startMouse').disabled=true;reportDiagnostic('');reportStep(mode==='camera'?'Menyalakan kamera…':'');try{unlockAudio();if(mode==='camera'){try{await setupCamera(attempt)}catch(e){e.cameraPhase=stream?'AI':'camera';throw e}}else cleanStream();prepareSession(mode);if(mode==='camera')startCalibration();else startSession()}catch(e){reportStep('⚠️ Aplikasi belum bisa dimulai.');reportDiagnostic(errorDescription(e,e.cameraPhase)+' Alternatif: gunakan mode mouse/sentuhan.');console.error(e);cleanStream()}finally{btn.disabled=false;get('startMouse').disabled=false}}
+async function begin(mode){if(get('startCamera').disabled)return;if(dirty&&!confirm('Form soal memiliki perubahan yang belum disimpan. Tetap bermain dengan bank soal tersimpan?'))return;requestGameFullscreen();const attempt=++setupAttempt,btn=get('startCamera');btn.disabled=true;get('startMouse').disabled=true;reportDiagnostic('');reportStep(mode==='camera'?'Menyalakan kamera…':'');try{unlockAudio();if(mode==='camera'){try{await setupCamera(attempt)}catch(e){e.cameraPhase=stream?'AI':'camera';throw e}}else cleanStream();prepareSession(mode);if(mode==='camera')startCalibration();else startSession()}catch(e){reportStep('⚠️ Aplikasi belum bisa dimulai.');reportDiagnostic(errorDescription(e,e.cameraPhase)+' Alternatif: gunakan mode mouse/sentuhan.');console.error(e);cleanStream()}finally{btn.disabled=false;get('startMouse').disabled=false}}
 function startCalibration(){const p=get('cameraPreview');try{p.pause()}catch{}p.classList.remove('visible');state.calib={active:true,open:0,fist:0,stage:'open',complete:false};get('introPanel').classList.add('hidden');get('calibrationPanel').classList.remove('hidden');get('resultPanel').classList.add('hidden');get('screen').classList.remove('hidden');get('calibrationBegin').disabled=true;get('calibrationProgress').value=0;get('calibrationStatus').textContent='🖐️ Tunjukkan TELAPAK TERBUKA di depan kamera.';get('calibrationPreview').srcObject=stream;get('calibrationPreview').play().catch(()=>{});lastVideoTime=-1;lastDetect=0}
 function finishCalibration(){
  if(state.running)return;
@@ -581,7 +650,7 @@ function drawHand(){
 }
 function drawParticles(dt){state.particles=state.particles.filter(p=>p.life>0);for(const p of state.particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=175*dt;p.life-=dt;ctx.globalAlpha=clamp(p.life,0,1);if(p.shape==='star'){ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot||0);ctx.fillStyle=p.c;ctx.beginPath();for(let i=0;i<5;i++){const a=i*Math.PI*2/5-Math.PI/2;ctx.lineTo(Math.cos(a)*p.r,Math.sin(a)*p.r);const a2=a+Math.PI/5;ctx.lineTo(Math.cos(a2)*p.r*.45,Math.sin(a2)*p.r*.45)}ctx.closePath();ctx.fill();ctx.restore()}else{ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,2*Math.PI);ctx.fillStyle=p.c;ctx.fill()}}ctx.globalAlpha=1;state.floaters=state.floaters.filter(f=>f.life>0);for(const f of state.floaters){f.y+=f.vy*dt;f.life-=dt;ctx.globalAlpha=clamp(f.life,0,1);ctx.textAlign='center';ctx.font='900 29px "Fredoka","Baloo 2",system-ui';ctx.fillStyle='#fff';ctx.fillText(f.text,f.x,f.y)}ctx.globalAlpha=1}
 function frame(now){const dt=Math.min((now-lastFrame)/1000,.075);lastFrame=now;ctx.setTransform(dpr,0,0,dpr,0,0);drawBackground(now);if(state.calib.active)calibrate(now);if(state.running){if(!state.feedback){state.elapsed+=dt;if(Number.isFinite(state.timeLeft))state.timeLeft=Math.max(0,state.timeLeft-dt);if(state.timeLeft<=0){endGame();raf=requestAnimationFrame(frame);return}}refreshHud();if(state.mode==='camera'&&!state.feedback)inferHand(now);if(!state.feedback)updateMosquitoes(dt);animateFlyDOM(now);drawParticles(dt);if(state.mode==='camera')drawHand();else if(state.mouse.x>=0){ctx.beginPath();ctx.arc(state.mouse.x,state.mouse.y,14,0,2*Math.PI);ctx.strokeStyle='#fffb75';ctx.lineWidth=4;ctx.stroke()}if(state.feedback&&now>=state.feedbackUntil)nextQuestion()}else drawParticles(dt);raf=requestAnimationFrame(frame)}
-function setupUI(){setupEditor();setupSpriteUploader();get('startCamera').onclick=()=>begin('camera');get('startMouse').onclick=()=>begin('mouse');get('calibrationBegin').onclick=finishCalibration;get('skipCalibration').onclick=()=>{if(!confirm('Lewati kalibrasi? Akurasi tangkapan mungkin berkurang.'))return;get('calibrationPanel').classList.add('hidden');get('calibrationPreview').pause();get('calibrationPreview').srcObject=null;startSession()};get('exitBtn').onclick=exitGame;get('backMenu').onclick=exitGame;get('calibrationCancel').onclick=exitGame;get('playAgain').onclick=()=>{get('resultPanel').classList.add('hidden');get('introPanel').classList.remove('hidden');begin(state.mode)};get('soundBtn').onclick=()=>{state.muted=!state.muted;get('soundBtn').textContent=state.muted?'🔇':'🔊'};get('fullBtn').onclick=()=>{if(!document.fullscreenElement)document.documentElement.requestFullscreen?.().catch(()=>{});else document.exitFullscreen?.().catch(()=>{})};get('nextQuestionBtn').onclick=nextQuestion;get('exportReports').onclick=exportReports;get('exportDetails').onclick=exportDetails;get('exportLast').onclick=exportLast;get('clearReports').onclick=()=>{if(!reports.length)return;if(!confirm('Hapus seluruh laporan hasil di perangkat ini? Unduh cadangan dahulu.'))return;reports=[];storageSet(REPORT_KEY,[]);renderReports();editMsg('✅ Laporan lokal dikosongkan.')};canvas.addEventListener('pointermove',e=>{if(state.mode==='mouse'){const r=canvas.getBoundingClientRect();state.mouse={x:e.clientX-r.left,y:e.clientY-r.top}}});canvas.addEventListener('pointerdown',e=>{if(!state.running||state.feedback||state.mode!=='mouse')return;const r=canvas.getBoundingClientRect(),m=matchFly({x:e.clientX-r.left,y:e.clientY-r.top},1.55);if(m)catchMosquito(m.id)});window.addEventListener('beforeunload',cleanStream);document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.running&&state.mode==='camera')setStatus('Buka kembali halaman untuk melanjutkan pelacakan.')});requestAnimationFrame(frame)}
+function setupUI(){setupFullscreenSupport();setupEditor();setupSpriteUploader();get('startCamera').onclick=()=>begin('camera');get('startMouse').onclick=()=>begin('mouse');get('calibrationBegin').onclick=finishCalibration;get('skipCalibration').onclick=()=>{if(!confirm('Lewati kalibrasi? Akurasi tangkapan mungkin berkurang.'))return;get('calibrationPanel').classList.add('hidden');get('calibrationPreview').pause();get('calibrationPreview').srcObject=null;startSession()};get('exitBtn').onclick=exitGame;get('backMenu').onclick=exitGame;get('calibrationCancel').onclick=exitGame;get('playAgain').onclick=()=>{get('resultPanel').classList.add('hidden');get('introPanel').classList.remove('hidden');begin(state.mode)};get('soundBtn').onclick=()=>{state.muted=!state.muted;get('soundBtn').textContent=state.muted?'🔇':'🔊'};get('fullBtn').onclick=toggleGameFullscreen;get('nextQuestionBtn').onclick=nextQuestion;get('exportReports').onclick=exportReports;get('exportDetails').onclick=exportDetails;get('exportLast').onclick=exportLast;get('clearReports').onclick=()=>{if(!reports.length)return;if(!confirm('Hapus seluruh laporan hasil di perangkat ini? Unduh cadangan dahulu.'))return;reports=[];storageSet(REPORT_KEY,[]);renderReports();editMsg('✅ Laporan lokal dikosongkan.')};canvas.addEventListener('pointermove',e=>{if(state.mode==='mouse'){const r=canvas.getBoundingClientRect();state.mouse={x:e.clientX-r.left,y:e.clientY-r.top}}});canvas.addEventListener('pointerdown',e=>{if(!state.running||state.feedback||state.mode!=='mouse')return;const r=canvas.getBoundingClientRect(),m=matchFly({x:e.clientX-r.left,y:e.clientY-r.top},1.55);if(m)catchMosquito(m.id)});window.addEventListener('beforeunload',cleanStream);document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.running&&state.mode==='camera')setStatus('Buka kembali halaman untuk melanjutkan pelacakan.')});requestAnimationFrame(frame)}
 setupUI();
 
 </script>

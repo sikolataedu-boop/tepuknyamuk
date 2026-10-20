@@ -1,0 +1,30 @@
+{
+  "id": "./",
+  "name": "TEPUK NYAMUK — Belajar & Bermain",
+  "short_name": "Tepuk Nyamuk",
+  "description": "Permainan edukasi pelacakan tangan dan bank soal guru untuk papan interaktif digital.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
+  "background_color": "#8ce8ff",
+  "theme_color": "#ffcf61",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icons/tepuk-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/tepuk-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
